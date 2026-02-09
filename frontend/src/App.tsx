@@ -1,3 +1,4 @@
+// frontend/src/App.tsx
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -5,6 +6,7 @@ import Login from './pages/Login';
 import Register from './pages/Register';
 import UserDashboard from './pages/UserDashboard';
 import AdminDashboard from './pages/AdminDashboard';
+import UploadPage from './pages/UploadPage'; // NEW IMPORT
 
 // Protected Route component
 const ProtectedRoute: React.FC<{ children: React.ReactNode; allowedRoles?: string[] }> = ({ 
@@ -45,6 +47,15 @@ const AppContent: React.FC = () => {
           element={
             <ProtectedRoute>
               {user?.role === 'admin' ? <AdminDashboard /> : <UserDashboard />}
+            </ProtectedRoute>
+          } 
+        />
+        
+        <Route 
+          path="/upload" 
+          element={
+            <ProtectedRoute>
+              <UploadPage />
             </ProtectedRoute>
           } 
         />
