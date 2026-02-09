@@ -11,7 +11,16 @@ const UserDashboard = () => {
   const [uploads, setUploads] = useState<any[]>([]);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
-
+  useEffect(() => {
+  fetchUploads();
+  
+  // Optional: Poll for updates every 30 seconds
+  const interval = setInterval(() => {
+    fetchUploads();
+  }, 30000);
+  
+  return () => clearInterval(interval);
+}, []);
   useEffect(() => {
     const fetchUploads = async () => {
       try {
@@ -31,41 +40,50 @@ const UserDashboard = () => {
     }
   };
 
-  const handleUpload = async () => {
-    if (!selectedFile) {
-      toast.error('Please select a file');
-      return;
-    }
+ const handleUpload = async () => {
+  if (!selectedFile) {
+    toast.error('Please select a file');
+    return;
+  }
 
-    if (selectedFile.type !== 'application/pdf') {
-      toast.error('Only PDF files are allowed');
-      return;
-    }
+  if (selectedFile.type !== 'application/pdf') {
+    toast.error('Only PDF files are allowed');
+    return;
+  }
 
-    const formData = new FormData();
-    formData.append('file', selectedFile);
+  const formData = new FormData();
+  formData.append('file', selectedFile);
 
-    setIsUploading(true);
-    try {
-      const res = await axios.post('/api/files/upload', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-          'x-auth-token': localStorage.getItem('token')
-        }
-      });
-      
-      toast.success('File uploaded successfully!');
-      // Refresh uploads
-      const resUploads = await axios.get('/api/files/my-uploads');
-      setUploads(resUploads.data);
-      setSelectedFile(null);
-    } catch (error: any) {
-      console.error('Upload failed', error);
-      toast.error(error.response?.data?.message || 'Upload failed');
-    } finally {
-      setIsUploading(false);
-    }
-  };
+  setIsUploading(true);
+  try {
+    // NO NEED FOR HEADERS HERE - interceptor handles it!
+    const res = await axios.post('/api/files/upload', formData);
+    
+    toast.success('File uploaded successfully!');
+    
+    // Refresh uploads list (interceptor adds token automatically)
+    await fetchUploads(); // Call your existing fetch function
+    
+    setSelectedFile(null);
+  } catch (error: any) {
+    console.error('Upload failed', error);
+    toast.error(error.response?.data?.message || 'Upload failed');
+  } finally {
+    setIsUploading(false);
+  }
+};
+
+// Fix fetchUploads to NOT manually add headers
+const fetchUploads = async () => {
+  try {
+    // NO HEADERS NEEDED - interceptor handles it!
+    const res = await axios.get('/api/files/my-uploads');
+    setUploads(res.data);
+  } catch (err) {
+    console.error('Error fetching uploads', err);
+    // Don't show toast here to avoid spam on initial load
+  }
+};
 
   return (
     <div className="min-h-screen bg-gray-100">

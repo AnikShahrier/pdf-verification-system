@@ -2,9 +2,14 @@
 const jwt = require('jsonwebtoken');
 const pool = require('../config/db');
 
+// backend/middleware/auth.js
 const verifyToken = (req, res, next) => {
-  let token = req.headers['x-auth-token'] || req.headers['authorization'];
+  // Check multiple possible header names
+  let token = req.headers['x-auth-token'] || 
+              req.headers['authorization'] || 
+              req.headers['x-access-token'];
 
+  // Remove 'Bearer ' prefix if present
   if (token && token.startsWith('Bearer ')) {
     token = token.slice(7, token.length);
   }

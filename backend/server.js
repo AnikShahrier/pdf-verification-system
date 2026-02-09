@@ -37,10 +37,26 @@ app.use('/api/files', require('./routes/fileRoutes'));
 
 // Health check
 app.get('/', (req, res) => {
-  res.send('PDF Verification System API is running');
+  res.json({ 
+    message: 'PDF Verification System API is running',
+    timestamp: new Date().toISOString()
+  });
 });
 
-// Start server
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error('Error:', err.stack);
+  res.status(500).json({ message: 'Something went wrong!', error: err.message });
+});
+
+// Start server - ONLY ONE app.listen() call!
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log('\n' + '='.repeat(60));
+  console.log('✅ PDF VERIFICATION SYSTEM STARTED');
+  console.log('='.repeat(60));
+  console.log(`🌐 Server: http://localhost:${PORT}`);
+  console.log(`📁 Uploads: ${uploadDir}`);
+  console.log(`📡 CORS: http://localhost:3000`);
+  console.log(`🗄️  Database: ${process.env.DB_HOST}:${process.env.DB_PORT}/${process.env.DB_NAME}`);
+  console.log('='.repeat(60) + '\n');
 });
