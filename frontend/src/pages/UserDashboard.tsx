@@ -1,49 +1,24 @@
 // frontend/src/pages/UserDashboard.tsx
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import Header from '../components/Header';
 import Footer from '../components/Footer';
-import ActionBar from '../components/ActionBar';
-import { toast, ToastContainer } from 'react-toastify';
-import 'react-toastify/dist/ReactToastify.css';
-import { gsap } from 'gsap';
+import { toast } from 'react-toastify';
 
 const UserDashboard = () => {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
   const [uploads, setUploads] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showUploadToast, setShowUploadToast] = useState(false);
-  const uploadToastRef = useRef<HTMLDivElement>(null);
+  const [editingUploadId, setEditingUploadId] = useState<number | null>(null);
+  const [showContactModal, setShowContactModal] = useState(false);
 
   useEffect(() => {
     fetchUploads();
-    
-    // Poll for updates every 30 seconds
-    const interval = setInterval(() => {
-      fetchUploads();
-    }, 30000);
-    
+    const interval = setInterval(fetchUploads, 30000);
     return () => clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
-    // Set up event listener for upload toast
-    const handleShowUploadToast = () => {
-      setShowUploadToast(true);
-      
-      // Animate the toast
-      gsap.fromTo(uploadToastRef.current,
-        { opacity: 0, y: 50 },
-        { opacity: 1, y: 0, duration: 0.5, ease: 'power2.out' }
-      );
-    };
-    
-    document.addEventListener('showUploadToast', handleShowUploadToast);
-    
-    return () => {
-      document.removeEventListener('showUploadToast', handleShowUploadToast);
-    };
   }, []);
 
   const fetchUploads = async () => {
@@ -57,138 +32,353 @@ const UserDashboard = () => {
     }
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files || e.target.files.length === 0) {
-      setShowUploadToast(false);
-      return;
-    }
+  const handleLogout = () => {
+    logout();
+    navigate('/login');
+  };
 
-    const file = e.target.files[0];
+  const handleContact = () => {
+    setShowContactModal(true);
+  };
+
+  const handleChangePassword = () => {
+    toast.warning('পাসওয়ার্ড পরিবর্তন পৃষ্ঠা শীঘ্রই যোগ করা হবে', {
+      autoClose: 3000
+    });
+  };
+
+  const handleReplaceFile = async (uploadId: number, file: File) => {
     const formData = new FormData();
     formData.append('file', file);
 
     try {
-      await axios.post('/api/files/upload', formData);
-      toast.success('File uploaded successfully!');
-      setShowUploadToast(false);
-      fetchUploads(); // Refresh uploads list
+      await axios.put(`/api/files/replace/${uploadId}`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      toast.success('ফাইল সফলভাবে প্রতিস্থাপন করা হয়েছে!');
+      fetchUploads();
+      setEditingUploadId(null);
     } catch (error: any) {
-      console.error('Upload failed', error);
-      toast.error(error.response?.data?.message || 'Upload failed');
+      console.error('Replace failed', error);
+      toast.error(error.response?.data?.message || 'ফাইল প্রতিস্থাপন ব্যর্থ হয়েছে');
+      setEditingUploadId(null);
     }
   };
 
+  const handleDeleteUpload = async (uploadId: number) => {
+    if (!window.confirm('আপনি কি নিশ্চিত আপনি এই আবেদনটি মুছে ফেলতে চান? এই কাজটি পূর্বাবস্থায় ফেরানো যাবে না।')) {
+      return;
+    }
+
+    try {
+      await axios.delete(`/api/files/${uploadId}`);
+      toast.success('আবেদন সফলভাবে মুছে ফেলা হয়েছে!');
+      fetchUploads();
+    } catch (error: any) {
+      console.error('Delete failed', error);
+      toast.error(error.response?.data?.message || 'আবেদন মোছা ব্যর্থ হয়েছে');
+    }
+  };
+
+  const triggerReplaceDialog = (uploadId: number) => {
+    setEditingUploadId(uploadId);
+    // File input will be triggered by hidden input ref
+  };
+
+  const handleReplaceFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (editingUploadId && e.target.files && e.target.files[0]) {
+      handleReplaceFile(editingUploadId, e.target.files[0]);
+      e.target.value = '';
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-green-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600 font-medium">তথ্য লোড হচ্ছে...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 flex flex-col">
       <Header />
       
-      <main className="container mx-auto px-4 py-8">
-        {/* Action Bar - This is the interactive bar over the table */}
-        <ActionBar />
-        
-        {/* Dashboard Card */}
-        <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-          <div className="flex justify-between items-center mb-6 pb-4 border-b border-gray-100">
-            <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-              <span>📄</span>
+      {/* User Action Bar with Logout, Contact, Password Change */}
+      <div className="bg-white border-b border-gray-200 py-4 mb-6 shadow-sm">
+        <div className="container mx-auto px-4 flex flex-col sm:flex-row justify-between items-center gap-4">
+          <div className="flex items-center gap-4 flex-wrap">
+            <h1 className="text-2xl font-bold text-green-800 flex items-center gap-2">
+              <div className="bg-green-600 text-white p-2 rounded-lg">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+                </svg>
+              </div>
               সকল আবেদন
-            </h2>
+            </h1>
+            <div className="text-gray-600">
+              মোট: <span className="font-bold">{uploads.length}</span> | 
+              পেন্ডিং: <span className="font-bold text-yellow-600">{uploads.filter(u => u.status === 'pending').length}</span> | 
+              যাচাইকৃত: <span className="font-bold text-green-600">{uploads.filter(u => u.status === 'verified').length}</span>
+            </div>
           </div>
           
-          {uploads.length === 0 && (
-            <div className="text-center py-16 bg-gray-50 rounded-lg border-2 border-dashed border-gray-200">
+          <div className="flex flex-wrap gap-3">
+            <button 
+              onClick={() => navigate('/upload')}
+              className="bg-green-600 text-white px-6 py-2.5 rounded-lg font-medium hover:bg-green-700 transition-all duration-300 shadow-md hover:shadow-lg flex items-center gap-2"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+              </svg>
+              নতুন আবেদন
+            </button>
+            
+            <button 
+              onClick={handleContact}
+              className="flex items-center gap-2 border border-green-600 text-green-600 px-5 py-2.5 rounded-lg hover:bg-green-50 transition-colors font-medium"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+              </svg>
+              <span>যোগাযোগ</span>
+            </button>
+            
+            <button 
+              onClick={handleChangePassword}
+              className="flex items-center gap-2 border border-green-600 text-green-600 px-5 py-2.5 rounded-lg hover:bg-green-50 transition-colors font-medium"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              </svg>
+              <span>পাসওয়ার্ড পরিবর্তন</span>
+            </button>
+            
+            <button 
+              onClick={handleLogout}
+              className="flex items-center gap-2 bg-red-100 text-red-700 px-5 py-2.5 rounded-lg hover:bg-red-200 transition-colors font-medium group"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 group-hover:-translate-x-1 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+              </svg>
+              <span>লগআউট</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <main className="container mx-auto px-4 py-2 flex-grow">
+        {/* Uploads Table */}
+        <div className="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
+          {uploads.length === 0 ? (
+            <div className="text-center py-16 bg-gray-50">
               <div className="text-6xl mb-4">📁</div>
-              <h3 className="text-2xl font-bold text-gray-800 mb-3">
-                এখনো কোনো আবেদন নেই
-              </h3>
+              <h3 className="text-2xl font-bold text-gray-800 mb-3">এখনো কোনো আবেদন নেই</h3>
               <p className="text-gray-600 max-w-md mx-auto mb-6">
-                আপনার প্রথম আবেদন জমা দিন "নতুন আবেদন" বাটনে ক্লিক করুন
+                "নতুন আবেদন" বাটনে ক্লিক করে আপনার প্রথম আবেদন জমা দিন
               </p>
+              <button 
+                onClick={() => navigate('/upload')}
+                className="bg-green-600 text-white px-8 py-3 rounded-lg font-medium text-lg hover:bg-green-700 transition-all duration-300 shadow-md hover:shadow-lg inline-flex items-center gap-2"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                </svg>
+                নতুন আবেদন করুন
+              </button>
             </div>
-          )}
-          
-          {uploads.length > 0 && (
+          ) : (
             <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="bg-gray-50">
-                    <th className="text-left p-4 font-medium text-gray-700">আবেদন নং</th>
-                    <th className="text-left p-4 font-medium text-gray-700">অবস্থা</th>
-                    <th className="text-left p-4 font-medium text-gray-700">নথি</th>
-                    <th className="text-left p-4 font-medium text-gray-700">জমা দেওয়ার তারিখ</th>
-                    <th className="text-left p-4 font-medium text-gray-700">সর্বশেষ হালনাগাদ</th>
-                    <th className="text-left p-4 font-medium text-gray-700">কার্যক্রম</th>
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">আবেদন নং</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">অবস্থা</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">নথি</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">জমা দেওয়ার তারিখ</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">সর্বশেষ হালনাগাদ</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">কার্যক্রম</th>
                   </tr>
                 </thead>
-                <tbody>
-                  {uploads.map((upload) => (
-                    <tr 
-                      key={upload.id} 
-                      className="border-b border-gray-100 hover:bg-gray-50 transition-colors"
-                    >
-                      <td className="p-4 font-medium text-gray-900">{upload.id}</td>
-                      <td className="p-4">
-                        <span className="px-3 py-1 rounded-full text-sm font-medium bg-yellow-100 text-yellow-800">
-                          পেন্ডিং
-                        </span>
-                      </td>
-                      <td className="p-4 max-w-xs truncate text-gray-700">
-                        {upload.original_filename}
-                      </td>
-                      <td className="p-4 text-gray-600">
-                        {new Date(upload.created_at).toLocaleDateString('bn-BD')}
-                      </td>
-                      <td className="p-4 text-gray-600">
-                        না
-                      </td>
-                      <td className="p-4">
-                        <span className="text-gray-400">অপেক্ষায়</span>
-                      </td>
-                    </tr>
-                  ))}
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {uploads.map((upload) => {
+                    const fileCount = Array.isArray(upload.file_paths) 
+                      ? upload.file_paths.length 
+                      : (upload.file_paths ? JSON.parse(upload.file_paths).length : 1);
+                    
+                    return (
+                      <tr key={upload.id} className="hover:bg-gray-50 transition-colors">
+                        <td className="px-4 py-3 whitespace-nowrap font-medium text-gray-900">{upload.id}</td>
+                        <td className="px-4 py-3">
+                          {upload.status === 'pending' ? (
+                            <span className="px-3 py-1 rounded-full text-sm font-medium bg-yellow-100 text-yellow-800">
+                              পেন্ডিং
+                            </span>
+                          ) : (
+                            <span className="px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800 flex items-center gap-1">
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                              </svg>
+                              যাচাইকৃত
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 max-w-xs truncate">
+                          <div className="flex items-center gap-2">
+                            {upload.file_type === 'multi-image' ? (
+                              <span className="text-blue-600 font-medium">🖼️ {fileCount}টি ইমেজ</span>
+                            ) : (
+                              <span className="text-gray-700">{upload.original_filename}</span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-gray-600 text-sm">
+                          {new Date(upload.created_at).toLocaleDateString('bn-BD')}
+                        </td>
+                        <td className="px-4 py-3 text-gray-600 text-sm">
+                          {upload.verified_at 
+                            ? new Date(upload.verified_at).toLocaleDateString('bn-BD')
+                            : upload.updated_at 
+                              ? new Date(upload.updated_at).toLocaleDateString('bn-BD')
+                              : 'না'}
+                        </td>
+                        <td className="px-4 py-3">
+                          {upload.status === 'pending' ? (
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => triggerReplaceDialog(upload.id)}
+                                className="px-3 py-1 border border-blue-600 text-blue-700 text-xs font-medium rounded-full bg-blue-50 hover:bg-blue-100 transition-colors flex items-center gap-1"
+                              >
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                </svg>
+                                সম্পাদনা
+                              </button>
+                              <button
+                                onClick={() => handleDeleteUpload(upload.id)}
+                                className="px-3 py-1 border border-red-600 text-red-700 text-xs font-medium rounded-full bg-red-50 hover:bg-red-100 transition-colors flex items-center gap-1"
+                              >
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                </svg>
+                                মুছুন
+                              </button>
+                            </div>
+                          ) : (
+                            <a 
+                              href={`http://localhost:5000/uploads/${upload.file_path.split('/').pop()}`} 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center px-3 py-1 border border-green-600 text-green-700 text-xs font-medium rounded-full bg-green-50 hover:bg-green-100 transition-colors"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                              </svg>
+                              ডাউনলোড
+                            </a>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           )}
         </div>
-      </main>
 
-      {/* Toast Notification for Upload */}
-      {showUploadToast && (
-        <div 
-          ref={uploadToastRef}
-          className="fixed bottom-8 left-1/2 transform -translate-x-1/2 w-96 z-50"
-        >
-          <div className="bg-white rounded-lg shadow-lg border border-gray-200 overflow-hidden">
-            <div className="p-4 border-b border-gray-200">
-              <h3 className="font-bold text-lg text-gray-800">ফাইল আপলোড করুন</h3>
-              <p className="text-gray-600 text-sm mt-1">PNG বা JPG ফর্ম্যাটে আপলোড করুন (সর্বোচ্চ 5MB)</p>
-            </div>
-            
-            <div className="p-4">
-              <input 
-                type="file" 
-                accept="image/png, image/jpeg" 
-                className="w-full mb-4"
-                onChange={handleFileUpload}
-                onClick={(e) => {
-                  // Reset input on click to allow re-uploading same file
-                  (e.target as HTMLInputElement).value = '';
-                }}
-              />
-              <button 
-                onClick={() => setShowUploadToast(false)}
-                className="w-full bg-gray-100 text-gray-700 py-2 rounded-md hover:bg-gray-200 transition-colors"
-              >
-                বন্ধ করুন
-              </button>
+        {/* Contact Modal */}
+        {showContactModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-md">
+              <div className="p-6">
+                <div className="flex justify-between items-start mb-4">
+                  <h3 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                    </svg>
+                    যোগাযোগের তথ্য
+                  </h3>
+                  <button 
+                    onClick={() => setShowContactModal(false)}
+                    className="text-gray-400 hover:text-gray-600 transition-colors"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+                
+                <div className="space-y-4 mt-4">
+                  <div className="flex items-start gap-3 p-3 bg-green-50 rounded-lg">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-green-600 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                    </svg>
+                    <div>
+                      <p className="font-medium text-gray-800">হেল্পলাইন নম্বর</p>
+                      <p className="text-gray-600">১৬১২২ (সকাল ৯টা - রাত ৯টা)</p>
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-start gap-3 p-3 bg-blue-50 rounded-lg">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-600 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                    </svg>
+                    <div>
+                      <p className="font-medium text-gray-800">ইমেইল</p>
+                      <p className="text-gray-600">support@gov.bd</p>
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-start gap-3 p-3 bg-purple-50 rounded-lg">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-purple-600 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                    <div>
+                      <p className="font-medium text-gray-800">ঠিকানা</p>
+                      <p className="text-gray-600">জাতীয় ভবন, বাংলাদেশ সচিবালয়, ঢাকা-১০০০</p>
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-start gap-3 p-3 bg-yellow-50 rounded-lg">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-yellow-600 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <div>
+                      <p className="font-medium text-gray-800">কার্যালয় সময়</p>
+                      <p className="text-gray-600">সকাল ৯:০০ - বিকাল ৫:০০ (সোমবার থেকে বৃহস্পতিবার)</p>
+                      <p className="text-gray-600">সকাল ৯:০০ - দুপুর ১:৩০ (শুক্রবার)</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-6 pt-4 border-t border-gray-200 flex justify-end">
+                  <button
+                    onClick={() => setShowContactModal(false)}
+                    className="px-5 py-2.5 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors"
+                  >
+                    বন্ধ করুন
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
+
+        {/* Hidden file input for replacement */}
+        <input
+          type="file"
+          className="hidden"
+          accept="application/pdf,image/png,image/jpeg"
+          onChange={handleReplaceFileSelect}
+        />
+      </main>
 
       <Footer />
-      <ToastContainer position="top-center" autoClose={3000} hideProgressBar={false} />
     </div>
   );
 };

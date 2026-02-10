@@ -22,6 +22,8 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+
+
 // Create uploads directory
 const uploadDir = path.join(__dirname, process.env.UPLOAD_DIR || 'uploads');
 if (!fs.existsSync(uploadDir)) {
@@ -30,6 +32,12 @@ if (!fs.existsSync(uploadDir)) {
 
 // Database connection
 const pool = require('./config/db');
+
+app.use('/uploads', express.static(uploadDir));
+
+// Routes
+app.use('/api/auth', require('./routes/authRoutes'));
+app.use('/api/files', require('./routes/fileRoutes'));
 
 // Routes
 app.use('/api/auth', require('./routes/authRoutes'));
