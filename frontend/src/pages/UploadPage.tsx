@@ -71,7 +71,7 @@ const UploadPage: React.FC = () => {
     if (!selectedFile) return;
 
     const formData = new FormData();
-    formData.append('file', selectedFile);
+    formData.append('files', selectedFile);
 
     setIsUploading(true);
     try {
