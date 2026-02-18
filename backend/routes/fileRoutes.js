@@ -203,7 +203,8 @@ router.post('/upload', verifyToken, upload.array('files', 10), async (req, res) 
 });
 
 // Replace file for pending upload (user only)
-router.put('/replace/:id', verifyToken, upload.single('file'), async (req, res) => {
+// Replace files for pending upload (user only) - FIXED FOR MULTIPLE FILES
+router.put('/replace/:id', verifyToken, upload.array('files', 10), async (req, res) => {
   try {
     const { id } = req.params;
     
@@ -234,28 +235,39 @@ router.put('/replace/:id', verifyToken, upload.single('file'), async (req, res) 
       console.warn('Could not delete old files:', err.message);
     }
     
-    // Validate new file
-    if (!req.file) {
-      return res.status(400).json({ message: 'No file uploaded' });
+    // Validate new files - FIXED: use req.files (plural)
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ message: 'No files uploaded' });
     }
     
-    const fileExt = path.extname(req.file.originalname).toLowerCase();
-    const isPDF = fileExt === '.pdf';
-    const isImage = ['.png', '.jpg', '.jpeg'].includes(fileExt);
-    
-    if (!isPDF && !isImage) {
-      await fs.unlink(req.file.path).catch(() => {});
-      return res.status(400).json({ message: 'Only PDF, PNG, and JPEG files are allowed' });
+    // Validate all files
+    const fileData = [];
+    for (const file of req.files) {
+      const fileExt = path.extname(file.originalname).toLowerCase();
+      const isPDF = fileExt === '.pdf';
+      const isImage = ['.png', '.jpg', '.jpeg'].includes(fileExt);
+      
+      if (!isPDF && !isImage) {
+        // Clean up uploaded files if validation fails
+        for (const f of req.files) {
+          await fs.unlink(f.path).catch(() => {});
+        }
+        return res.status(400).json({ message: 'Only PDF, PNG, and JPEG files are allowed' });
+      }
+      
+      fileData.push({
+        path: file.path,
+        original_name: file.originalname
+      });
     }
     
-    // Determine new file type
-    const newFileType = isPDF ? 'pdf' : 'image';
-    const newFileData = [{
-      path: req.file.path,
-      original_name: req.file.originalname
-    }];
+    // Determine upload type
+    const isMultiImage = fileData.length > 1;
+    const file_type = isMultiImage ? 'multi-image' : 
+                      (path.extname(fileData[0].original_name).toLowerCase() === '.pdf' ? 'pdf' : 'image');
 
-    // Update database
+    // Update database - FIXED: store ONLY filename, not full path
+    const fileNameOnly = path.basename(fileData[0].path);
     const updatedUpload = await pool.query(
       `UPDATE uploads 
        SET file_paths = $1,
@@ -266,20 +278,26 @@ router.put('/replace/:id', verifyToken, upload.single('file'), async (req, res) 
        WHERE id = $5
        RETURNING *`,
       [
-        JSON.stringify(newFileData),
-        newFileType,
-        req.file.originalname,
-        req.file.path,
+        JSON.stringify(fileData),
+        file_type,
+        fileData.map(f => f.original_name).join(', '),
+        fileNameOnly, // CRITICAL FIX: Store only filename, not full path
         id
       ]
     );
     
     res.json({
-      message: 'File replaced successfully',
+      message: `${fileData.length} file(s) replaced successfully`,
       data: updatedUpload.rows[0]
     });
   } catch (err) {
     console.error('Replace file error:', err);
+    // Clean up uploaded files on error
+    if (req.files) {
+      req.files.forEach(file => {
+        fs.unlink(file.path).catch(() => {});
+      });
+    }
     res.status(500).json({ message: 'Server error during file replacement', error: err.message });
   }
 });
@@ -312,6 +330,100 @@ router.get('/pending', verifyToken, authorizeRole('admin'), async (req, res) => 
   } catch (err) {
     console.error('Error fetching pending uploads:', err.message);
     res.status(500).json({ message: 'Server error' });
+  }
+});
+
+
+// ADD THIS NEW ROUTE (keep your existing replace route)
+router.patch('/edit/:id', verifyToken, upload.array('files', 10), async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // Get existing upload
+    const uploadRes = await pool.query(
+      'SELECT * FROM uploads WHERE id = $1 AND user_id = $2 AND status = $3',
+      [id, req.user.id, 'pending']
+    );
+    
+    if (uploadRes.rows.length === 0) {
+      return res.status(404).json({ 
+        message: 'Pending upload not found or already verified' 
+      });
+    }
+    
+    const upload = uploadRes.rows[0];
+    
+    // Parse request body for operations
+    const { removeFiles = [], addFiles = [] } = req.body;
+    
+    // Validate removeFiles (must be indices of existing files)
+    const existingFiles = upload.file_paths && Array.isArray(upload.file_paths) 
+      ? upload.file_paths 
+      : [{ path: upload.file_path, original_name: upload.original_filename }];
+    
+    const filesToRemove = [];
+    for (const index of removeFiles) {
+      if (index >= 0 && index < existingFiles.length) {
+        filesToRemove.push(existingFiles[index]);
+      }
+    }
+    
+    // Delete removed files
+    for (const file of filesToRemove) {
+      await fs.unlink(file.path).catch(() => {});
+    }
+    
+    // Process new files
+    const newFileData = [];
+    if (req.files && req.files.length > 0) {
+      for (const file of req.files) {
+        const fileExt = path.extname(file.originalname).toLowerCase();
+        const isPDF = fileExt === '.pdf';
+        const isImage = ['.png', '.jpg', '.jpeg'].includes(fileExt);
+        
+        if (!isPDF && !isImage) {
+          await fs.unlink(file.path).catch(() => {});
+          return res.status(400).json({ message: 'Only PDF, PNG, and JPEG files are allowed' });
+        }
+        
+        newFileData.push({
+          path: file.path,
+          original_name: file.originalname
+        });
+      }
+    }
+    
+    // Build new file list: existing files (not removed) + new files
+    const remainingFiles = existingFiles.filter((_, index) => !removeFiles.includes(index));
+    const allFiles = [...remainingFiles, ...newFileData];
+    
+    // Update database
+    const updatedUpload = await pool.query(
+      `UPDATE uploads 
+       SET file_paths = $1,
+           file_type = $2,
+           original_filename = $3,
+           file_path = $4,
+           updated_at = NOW()
+       WHERE id = $5
+       RETURNING *`,
+      [
+        JSON.stringify(allFiles),
+        allFiles.length > 1 ? 'multi-image' : 
+        (allFiles.length > 0 && path.extname(allFiles[0].original_name).toLowerCase() === '.pdf' ? 'pdf' : 'image'),
+        allFiles.map(f => f.original_name).join(', '),
+        allFiles.length > 0 ? path.basename(allFiles[0].path) : '',
+        id
+      ]
+    );
+    
+    res.json({
+      message: `${filesToRemove.length} file(s) removed, ${newFileData.length} file(s) added`,
+      data: updatedUpload.rows[0]
+    });
+  } catch (err) {
+    console.error('Edit file error:', err);
+    res.status(500).json({ message: 'Server error during file editing', error: err.message });
   }
 });
 

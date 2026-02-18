@@ -25,7 +25,9 @@ app.use(express.urlencoded({ extended: true }));
 
 
 // Create uploads directory
-const uploadDir = path.join(__dirname, process.env.UPLOAD_DIR || 'uploads');
+// Windows-compatible path handling
+const uploadDir = path.join(__dirname, process.env.UPLOAD_DIR || 'uploads')
+  .replace(/\\/g, '/');
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }

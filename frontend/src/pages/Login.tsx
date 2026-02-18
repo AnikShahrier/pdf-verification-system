@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
+import loginlogo from '../assets/loginlogo.png'
 
 const Login = () => {
   const [email, setEmail] = useState('');
@@ -24,7 +25,7 @@ const Login = () => {
       <div className="bg-white p-8 rounded-lg shadow-md w-96">
         <div className="text-center mb-6">
           <img 
-            src="https://www.bangladesh.gov.bd/sites/default/files/2022-12/logo.png" 
+            src={loginlogo} 
             alt="Government Logo" 
             className="mx-auto h-16"
           />
