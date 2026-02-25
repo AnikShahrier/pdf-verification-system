@@ -472,23 +472,23 @@ const AdminDashboard = () => {
                     />
                   </div>
 
-                  {/* Field 7: By authority */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-2">
-                      <span className="bg-blue-600 text-white text-xs font-bold px-2 py-0.5 rounded">7</span>
-                      by [name], Assistant Secretary, Ministry of Foreign Affairs *
-                    </label>
-                    <select
-                      value={certificateData.authorityName}
-                      onChange={(e) => setCertificateData({...certificateData, authorityName: e.target.value})}
-                      className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                    >
-                      <option value=" MD. ASIF KHAN PRANTO"> MD. ASIF KHAN PRANTO</option>
-                      <option value="asif">Asif</option>
-                      <option value="tushar">Tushar</option>
-                    </select>
-                    <p className="text-xs text-gray-500 mt-1">Name will appear in uppercase in certificate</p>
-                  </div>
+{/* Field 7: By authority */}
+<div>
+  <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-2">
+    <span className="bg-blue-600 text-white text-xs font-bold px-2 py-0.5 rounded">7</span>
+    by [name], Assistant Secretary, Ministry of Foreign Affairs *
+  </label>
+  <select
+    value={certificateData.authorityName}
+    onChange={(e) => setCertificateData({...certificateData, authorityName: e.target.value})}
+    className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+  >
+    <option value="MD. ASIF KHAN PRANTO">MD. ASIF KHAN PRANTO</option>
+    <option value="TUSHAR">TUSHAR</option>
+    <option value="ANIK">ANIK</option>
+  </select>
+  <p className="text-xs text-gray-500 mt-1">Name will appear in uppercase in certificate</p>
+</div>
 
                   {/* Field 8: Certificate Number (Auto-generated) */}
                   <div className="bg-yellow-50 p-3 rounded-lg border border-yellow-200">

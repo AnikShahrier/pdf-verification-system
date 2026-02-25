@@ -89,7 +89,7 @@ async function generateEApostilleCertificate(certificateData) {
         y: height / 2 - dims.height / 2 - 20,
         width: dims.width,
         height: dims.height,
-        opacity: 0.15,
+        opacity: 0.25,
       });
     }
 
@@ -277,19 +277,40 @@ page.drawText('9. Seal/stamp:', {
   color: textColor
 });
 page.drawText('10. Signature:', { 
-  x: centerX + 90, // ⭐ Changed from centerX + 20 to centerX + 40 (moved 20px more right)
+  x: centerX + 90,
   y: sealSigY, 
   size: 12, 
   font: timesBold,
   color: textColor
 });
 
+// ⭐ LOAD SEAL (common for all)
 const sealImg = await loadImage(doc, path.join(assetsPath, 'seal.jpg'));
-const sigImg = await loadImage(doc, path.join(assetsPath, 'signature.png'));
 
-// Seal on the left - smaller size
+// ⭐ LOAD SIGNATURE BASED ON AUTHORITY NAME
+const authorityName = safeText(certificateData.authorityName || 'MD. ASIF KHAN PRANTO').toUpperCase();
+let signatureFileName;
+
+// Map authority name to signature file
+switch(authorityName) {
+  case 'MD. ASIF KHAN PRANTO':
+    signatureFileName = 'signature_asif.png'; // or whatever your file is named
+    break;
+  case 'TUSHAR':
+    signatureFileName = 'signature_tushar.png';
+    break;
+  case 'ANIK':
+    signatureFileName = 'signature_anik.png';
+    break;
+  default:
+    signatureFileName = 'signature.png'; // default fallback
+}
+
+const sigImg = await loadImage(doc, path.join(assetsPath, signatureFileName));
+
+// Seal on the left
 if (sealImg) {
-  const sealSize = 110; // ⭐ Reduced from 140 to 110
+  const sealSize = 110;
   page.drawImage(sealImg, { 
     x: labelX, 
     y: sealSigY - sealSize - 10, 
@@ -298,17 +319,28 @@ if (sealImg) {
   });
 }
 
-// Signature on the right - adjusted position
+// Signature on the right
 if (sigImg) {
   const sigWidth = 100;
   const sigHeight = 50;
   page.drawImage(sigImg, { 
-    x: centerX + 90, // ⭐ Changed from centerX + 20 to centerX + 40 (moved 20px more right)
+    x: centerX + 90,
     y: sealSigY - sigHeight - 10, 
     width: sigWidth, 
     height: sigHeight 
   });
+} else {
+  // Fallback if signature image not found - draw text
+  console.warn(`Signature image not found: ${signatureFileName}`);
+  page.drawText('[SIGNATURE]', { 
+    x: centerX + 90,
+    y: sealSigY - 30, 
+    size: 10, 
+    font: timesRegular,
+    color: textColor
+  });
 }
+
 
    // Remove the sealBottom/sigBottom calculations - not needed
 
@@ -322,8 +354,8 @@ const qrBuffer = await generateQRCode(`https://mofa.servicedirectory.apostille.m
 if (qrBuffer) {
   const qrImage = await doc.embedPng(qrBuffer);
   page.drawImage(qrImage, { 
-    x: qrX, 
-    y: bottomSectionY, 
+    x: qrX+10, 
+    y: bottomSectionY-60, 
     width: qrSize, 
     height: qrSize 
   });
@@ -343,49 +375,49 @@ page.drawText(`Digitally signed by ${authName}`, {
   x: infoX, 
   y: infoY, 
   size: 10, 
-  font: timesRegular,
+  font: timesBold,
   color: textColor
 });
 page.drawText(`Date: ${dateStr}`, { 
   x: infoX, 
   y: infoY - lineSpacing, 
   size: 10, 
-  font: timesRegular,
+  font: timesBold,
   color: textColor
 });
 page.drawText(`${timeStr} +06:00`, { 
   x: infoX, 
   y: infoY - (lineSpacing * 2), 
   size: 10, 
-  font: timesRegular,
+  font: timesBold,
   color: textColor
 });
 page.drawText('Reason: Document', { 
   x: infoX, 
   y: infoY - (lineSpacing * 3), 
   size: 10, 
-  font: timesRegular,
+  font: timesBold,
   color: textColor
 });
 page.drawText('Signing', { 
   x: infoX, 
   y: infoY - (lineSpacing * 4), 
   size: 10, 
-  font: timesRegular,
+  font: timesBold,
   color: textColor
 });
 page.drawText('Location: Ministry of', { 
   x: infoX, 
   y: infoY - (lineSpacing * 5), 
   size: 10, 
-  font: timesRegular,
+  font: timesBold,
   color: textColor
 });
 page.drawText('foreign Affairs, Dhaka, BD', { 
   x: infoX, 
   y: infoY - (lineSpacing * 6), 
   size: 10, 
-  font: timesRegular,
+  font: timesBold,
   color: textColor
 });
 
