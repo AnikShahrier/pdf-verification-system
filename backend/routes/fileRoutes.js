@@ -7,10 +7,19 @@ const fs = require('fs').promises;
 const { verifyToken, authorizeRole } = require('../middleware/auth');
 const pool = require('../config/db');
 
-// Import the certificate generator from utils
+// Import the certificate generator and document processor from utils
 const { generateEApostilleCertificate } = require('../utils/certificateGenerator');
+const { processDocumentWithSignatures } = require('../utils/documentProcessor');
 
 // ========== HELPER FUNCTIONS ==========
+
+function generateCertNumber() {
+  let num = '';
+  for (let i = 0; i < 12; i++) {
+    num += Math.floor(Math.random() * 10);
+  }
+  return num;
+}
 
 async function isValidPDF(filePath) {
   try {
@@ -305,180 +314,212 @@ router.get('/completed', verifyToken, authorizeRole('admin'), async (req, res) =
   }
 });
 
-// Verify file (admin only) - Generates e-APOSTILLE certificate
-router.post('/verify/:id', verifyToken, authorizeRole('admin'), async (req, res) => {
+// Get all additional signers for dropdown (admin only)
+router.get('/additional-signers', verifyToken, authorizeRole('admin'), async (req, res) => {
   try {
-    const { id } = req.params;
-    
-    // DEBUG: Log incoming request body
-    console.log('📥 Received verification request body:', req.body);
-    
-    const { 
-      documentIssuer,      // Field 2: has been signed by
-      documentTitle,       // Field 3: acting in the capacity of (maps to actingCapacity)
-      documentLocation,    // Field 4: bears the seal/stamp of (maps to sealLocation)
-      certificateLocation, // Field 5: at [location]
-      certificateDate,     // Field 6: the [date]
-      authorityName        // Field 7: by [name]
-    } = req.body;
-    
-    // Validate inputs
-    const missingFields = [];
-    if (!documentIssuer) missingFields.push('documentIssuer');
-    if (!documentTitle) missingFields.push('documentTitle (actingCapacity)');
-    if (!documentLocation) missingFields.push('documentLocation (sealLocation)');
-    if (!certificateLocation) missingFields.push('certificateLocation');
-    if (!certificateDate) missingFields.push('certificateDate');
-    if (!authorityName) missingFields.push('authorityName');
-    
-    if (missingFields.length > 0) {
-      console.error('❌ Missing fields:', missingFields);
-      return res.status(400).json({ 
-        message: 'All certificate fields are required',
-        missingFields: missingFields,
-        receivedBody: req.body
-      });
-    }
+    const signers = await pool.query('SELECT * FROM additional_signers ORDER BY name');
+    res.json(signers.rows);
+  } catch (err) {
+    console.error('Error fetching additional signers:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
 
-    // Get upload record
-    const uploadRes = await pool.query('SELECT * FROM uploads WHERE id = $1', [id]);
-    if (uploadRes.rows.length === 0) {
+// Get verification details for public page (no auth required)
+router.get('/verify/:certificateNumber', async (req, res) => {
+  try {
+    const { certificateNumber } = req.params;
+    
+    const uploads = await pool.query(
+      `SELECT uploads.*, users.name as user_name 
+       FROM uploads 
+       JOIN users ON uploads.user_id = users.id
+       WHERE uploads.certificate_number = $1 AND uploads.status = $2`,
+      [certificateNumber, 'verified']
+    );
+    
+    if (uploads.rows.length === 0) {
+      return res.status(404).json({ message: 'Certificate not found' });
+    }
+    
+    const upload = uploads.rows[0];
+    
+    res.json({
+      certificateNumber: upload.certificate_number,
+      certificatePath: upload.certificate_pdf_path,
+      certificateData: upload.certificate_data,
+      reuploadedFiles: upload.reuploaded_file_paths || [],
+      signaturesData: upload.additional_signatures_data || [],
+      verifiedAt: upload.verified_at,
+      userName: upload.user_name
+    });
+  } catch (err) {
+    console.error('Error fetching verification:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Modified verify endpoint with re-upload and additional signatures
+router.post('/verify/:id', verifyToken, authorizeRole('admin'), upload.array('reuploadedFiles', 10), async (req, res) => {
+  const uploadId = req.params.id;
+  
+  try {
+    // Get upload details
+    const uploads = await pool.query('SELECT * FROM uploads WHERE id = $1', [uploadId]);
+    if (uploads.rows.length === 0) {
       return res.status(404).json({ message: 'Upload not found' });
     }
-
-    const upload = uploadRes.rows[0];
-    if (upload.status !== 'pending') {
-      return res.status(400).json({ 
-        message: 'Only pending files can be verified' 
-      });
+    
+    const upload = uploads.rows[0];
+    
+    // Certificate data from body
+    const {
+      documentIssuer,
+      documentTitle,
+      documentLocation,
+      certificateLocation,
+      certificateDate,
+      authorityName,
+      additionalSigners // JSON array of {signerId, date}
+    } = req.body;
+    
+    // Validate required fields
+    if (!documentIssuer || !documentTitle || !documentLocation || 
+        !certificateLocation || !certificateDate || !authorityName) {
+      return res.status(400).json({ message: 'All certificate fields are required' });
     }
-
-    // Verify file(s) exist
-    try {
-      if (upload.file_paths && Array.isArray(upload.file_paths)) {
-        for (const file of upload.file_paths) {
-          await fs.access(file.path);
-        }
-      } else {
-        await fs.access(upload.file_path);
-      }
-    } catch (err) {
-      console.error('❌ File(s) not found:', err.message);
-      return res.status(404).json({ 
-        message: 'Original file(s) missing. Upload may be corrupted.' 
-      });
+    
+    // Check if re-uploaded files provided
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ message: 'Please re-upload documents with stamps' });
     }
-
-    console.log(`✅ Starting e-APOSTILLE verification for upload ID: ${id}`);
-
-    // Create certificate data object - MUST match what certificateGenerator expects
-    // In the verify route, update certificateData to include baseUrl:
-const certificateData = {
-  country: 'BANGLADESH',
-  documentIssuer: documentIssuer,
-  actingCapacity: documentTitle,
-  sealLocation: documentLocation,
-  certificateLocation: certificateLocation,
-  certificateDate: certificateDate,
-  authorityName: authorityName.toLowerCase(),
-  baseUrl: `${req.protocol}://${req.get('host')}` // For QR code URL
-};
-
-    console.log('📄 Certificate data being sent to generator:', certificateData);
-
-    // Call the imported function from certificateGenerator.js
-    let pdfBytes, certificateNumber;
-    try {
-      const result = await generateEApostilleCertificate(certificateData, upload);
-      pdfBytes = result.pdfBytes;
-      certificateNumber = result.certificateNumber;
-    } catch (certErr) {
-      console.error('❌ Certificate generation failed:', certErr);
-      return res.status(500).json({
-        message: 'Certificate generation failed',
-        error: certErr.message,
-        stack: certErr.stack
-      });
-    }
+    
+    // Generate certificate number
+    const certNumber = generateCertNumber();
+    
+    // Generate certificate PDF
+    const certificateData = {
+      documentIssuer,
+      actingCapacity: documentTitle,
+      sealLocation: documentLocation,
+      certificateLocation,
+      certificateDate,
+      authorityName,
+      certificateNumber: certNumber,
+      baseUrl: `${req.protocol}://${req.get('host')}`
+    };
+    
+    const { pdfBytes, certificateNumber } = await generateEApostilleCertificate(certificateData);
     
     // Save certificate PDF
     const uploadDir = path.join(__dirname, '../', process.env.UPLOAD_DIR || 'uploads');
-    const newFileName = `certificate_${certificateNumber}_${Date.now()}.pdf`;
-    const newFilePath = path.join(uploadDir, newFileName);
+    const certDir = path.join(uploadDir, 'certificates');
+    await fs.mkdir(certDir, { recursive: true });
     
-    await fs.writeFile(newFilePath, pdfBytes);
-    console.log(`✅ e-APOSTILLE certificate saved: ${newFilePath}`);
-
-    // Update database - Use existing columns, map certificateLocation to document_location for now
-    // or add certificate_location column to your database
-    try {
-      const result = await pool.query(
-        `UPDATE uploads 
-         SET status = 'verified', 
-             certificate_data = $1, 
-             certificate_number = $2,
-             verified_by = $3, 
-             verified_at = NOW(),
-             file_path = $4,
-             original_filename = $5,
-             document_issuer = $6,
-             document_title = $7,
-             document_location = $8,
-             certificate_date = $9,
-             authority_name = $10
-         WHERE id = $11
-         RETURNING *`,
-        [
-          JSON.stringify(certificateData),
-          certificateNumber,
-          req.user.id,
-          newFilePath,
-          `certificate_${certificateNumber}.pdf`,
-          documentIssuer,
-          documentTitle,
-          certificateLocation, // Using certificateLocation for document_location (or create new column)
-          certificateDate,
-          authorityName,
-          id
-        ]
-      );
-
-      // Delete original file(s)
-      try {
-        if (upload.file_paths && Array.isArray(upload.file_paths)) {
-          for (const file of upload.file_paths) {
-            if (file.path) await fs.unlink(file.path).catch(() => {});
-          }
-        } else if (upload.file_path) {
-          await fs.unlink(upload.file_path).catch(() => {});
+    const certFilename = `cert_${certificateNumber}.pdf`;
+    const certPath = path.join(certDir, certFilename);
+    await fs.writeFile(certPath, pdfBytes);
+    
+    // Process re-uploaded files with additional signatures
+    let reuploadedPaths = [];
+    let signaturesData = [];
+    
+    if (additionalSigners) {
+      const signerIds = JSON.parse(additionalSigners);
+      
+      if (signerIds.length > 0) {
+        // Get additional signers details from database
+        const signerIdsArray = signerIds.map(s => s.signerId);
+        const signersResult = await pool.query(
+          'SELECT * FROM additional_signers WHERE id = ANY($1)',
+          [signerIdsArray]
+        );
+        
+        // Add date to each signer
+        const signersWithDates = signersResult.rows.map(signer => {
+          const selected = signerIds.find(s => s.signerId === signer.id);
+          return {
+            ...signer,
+            signatureDate: selected?.date || new Date().toISOString().split('T')[0]
+          };
+        });
+        
+        signaturesData = signersWithDates;
+        
+        // Process each re-uploaded file with signatures
+        const verifiedDir = path.join(uploadDir, 'verified');
+        await fs.mkdir(verifiedDir, { recursive: true });
+        
+        for (const file of req.files) {
+          const processedPath = await processDocumentWithSignatures(
+            file.path,
+            signersWithDates,
+            certificateNumber
+          );
+          reuploadedPaths.push(processedPath);
         }
-        console.log(`✅ Original file(s) deleted`);
-      } catch (err) {
-        console.warn(`⚠️ Failed to delete original files: ${err.message}`);
       }
-
-      console.log(`✅✅✅ e-APOSTILLE CERTIFICATE GENERATED SUCCESSFULLY FOR UPLOAD #${id} ✅✅✅`);
-      res.json({ 
-        message: 'e-APOSTILLE certificate generated successfully', 
-        data: result.rows[0],
-        certificateNumber
-      });
-    } catch (dbErr) {
-      console.error('❌ Database update failed:', dbErr);
-      // Clean up certificate file if DB fails
-      await fs.unlink(newFilePath).catch(() => {});
-      throw dbErr;
     }
     
-  } catch (err) {
-    console.error('❌❌❌ e-APOSTILLE GENERATION FAILED ❌❌❌');
-    console.error('Error:', err.message);
-    console.error('Stack:', err.stack);
-    res.status(500).json({ 
-      message: 'Certificate generation failed', 
-      error: err.message,
-      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+    // Update database
+    await pool.query(
+      `UPDATE uploads SET 
+        status = 'verified',
+        verified_by = $1,
+        verified_at = NOW(),
+        certificate_data = $2,
+        certificate_pdf_path = $3,
+        certificate_number = $4,
+        reuploaded_file_paths = $5,
+        additional_signatures_data = $6,
+        document_issuer = $7,
+        document_title = $8,
+        document_location = $9,
+        certificate_date = $10,
+        authority_name = $11
+      WHERE id = $12`,
+      [
+        req.user.id,
+        JSON.stringify(certificateData),
+        `/uploads/certificates/${certFilename}`,
+        certificateNumber,
+        JSON.stringify(reuploadedPaths),
+        JSON.stringify(signaturesData),
+        documentIssuer,
+        documentTitle,
+        certificateLocation,
+        certificateDate,
+        authorityName,
+        uploadId
+      ]
+    );
+    
+    // Delete original files
+    try {
+      if (upload.file_paths && Array.isArray(upload.file_paths)) {
+        for (const file of upload.file_paths) {
+          if (file.path) await fs.unlink(file.path).catch(() => {});
+        }
+      } else if (upload.file_path) {
+        await fs.unlink(upload.file_path).catch(() => {});
+      }
+    } catch (err) {
+      console.warn('Could not delete original files:', err.message);
+    }
+    
+    res.json({ 
+      message: 'e-APOSTILLE Certificate and signed documents generated successfully',
+      certificateNumber,
+      certificatePath: `/uploads/certificates/${certFilename}`
     });
+    
+  } catch (err) {
+    console.error('Verification error:', err);
+    // Clean up uploaded files on error
+    if (req.files) {
+      req.files.forEach(file => fs.unlink(file.path).catch(() => {}));
+    }
+    res.status(500).json({ message: 'Certificate generation failed', error: err.message });
   }
 });
 

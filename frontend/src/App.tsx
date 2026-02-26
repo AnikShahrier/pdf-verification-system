@@ -7,6 +7,7 @@ import Register from './pages/Register';
 import UserDashboard from './pages/UserDashboard';
 import AdminDashboard from './pages/AdminDashboard';
 import UploadPage from './pages/UploadPage'; // NEW IMPORT
+import VerificationPage from './pages/VerificationPage';
 
 // Protected Route component
 const ProtectedRoute: React.FC<{ children: React.ReactNode; allowedRoles?: string[] }> = ({ 
@@ -51,6 +52,8 @@ const AppContent: React.FC = () => {
           } 
         />
         
+          <Route path="/verify/:certificateNumber" element={<VerificationPage />} />
+
         <Route 
           path="/upload" 
           element={

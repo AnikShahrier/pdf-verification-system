@@ -15,15 +15,20 @@ const AdminDashboard = () => {
   const [completedUploads, setCompletedUploads] = useState<any[]>([]);
   const [selectedUpload, setSelectedUpload] = useState<any>(null);
   
-  // Fixed certificate data structure to match actual e-APOSTILLE format
+  // Additional signers state
+  const [additionalSigners, setAdditionalSigners] = useState<any[]>([]);
+  const [selectedSigners, setSelectedSigners] = useState<{signerId: number, date: string}[]>([]);
+  const [reuploadedFiles, setReuploadedFiles] = useState<File[]>([]);
+  
+  // Certificate data state
   const [certificateData, setCertificateData] = useState({
-  documentIssuer: '',        // Field 2: has been signed by
-  actingCapacity: '',        // Field 3: acting in the capacity of
-  documentLocation: 'Dhaka', // Field 4: bears the seal/stamp of
-  certificateLocation: 'Dhaka', // Field 5: at [location]
-  certificateDate: new Date().toISOString().split('T')[0], // Field 6
-  authorityName: 'anik'      // Field 7: by [name]
-});
+    documentIssuer: '',
+    actingCapacity: '',
+    documentLocation: 'Dhaka',
+    certificateLocation: 'Dhaka',
+    certificateDate: new Date().toISOString().split('T')[0],
+    authorityName: 'ANIK'
+  });
   
   const [isVerifying, setIsVerifying] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -52,6 +57,52 @@ const AdminDashboard = () => {
     fetchData();
   }, []);
 
+  useEffect(() => {
+    if (selectedUpload) {
+      fetchAdditionalSigners();
+    }
+  }, [selectedUpload]);
+
+  const fetchAdditionalSigners = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.get('/api/files/additional-signers', {
+        headers: { 'x-auth-token': token }
+      });
+      setAdditionalSigners(res.data);
+    } catch (err) {
+      console.error('Failed to fetch signers', err);
+      toast.error('Failed to load additional signers');
+    }
+  };
+
+  // Handle signer selection
+  const addSigner = (signerId: number) => {
+    if (!selectedSigners.find(s => s.signerId === signerId)) {
+      setSelectedSigners([...selectedSigners, {
+        signerId,
+        date: new Date().toISOString().split('T')[0]
+      }]);
+    }
+  };
+
+  const removeSigner = (signerId: number) => {
+    setSelectedSigners(selectedSigners.filter(s => s.signerId !== signerId));
+  };
+
+  const updateSignerDate = (signerId: number, date: string) => {
+    setSelectedSigners(selectedSigners.map(s => 
+      s.signerId === signerId ? { ...s, date } : s
+    ));
+  };
+
+  // Handle re-uploaded files
+  const handleReuploadFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      setReuploadedFiles(Array.from(e.target.files));
+    }
+  };
+
   const handleLogout = () => {
     logout();
     navigate('/login');
@@ -59,69 +110,90 @@ const AdminDashboard = () => {
 
   const handleVerifyClick = (upload: any) => {
     setSelectedUpload(upload);
-    // Pre-fill with sensible defaults matching the certificate fields
+    // Reset states
+    setSelectedSigners([]);
+    setReuploadedFiles([]);
+    
+    // Pre-fill with sensible defaults
     setCertificateData({
       documentIssuer: upload.user_name || '',
-      actingCapacity: 'Metropolitan Magistrate', // Default based on your PDF example
+      actingCapacity: 'Metropolitan Magistrate',
       documentLocation: 'Dhaka',
       certificateLocation: 'Dhaka',
       certificateDate: new Date().toISOString().split('T')[0],
-      authorityName: 'anik'
+      authorityName: 'ANIK'
     });
   };
 
   const handleVerify = async () => {
-  if (!selectedUpload) return;
-  
-  // Validate all required fields
-  if (!certificateData.documentIssuer || !certificateData.actingCapacity || 
-      !certificateData.documentLocation || !certificateData.certificateLocation || 
-      !certificateData.certificateDate || !certificateData.authorityName) {
-    toast.error('All certificate fields are required');
-    return;
-  }
+    if (!selectedUpload) return;
+    
+    // Validate all required fields
+    if (!certificateData.documentIssuer || !certificateData.actingCapacity || 
+        !certificateData.documentLocation || !certificateData.certificateLocation || 
+        !certificateData.certificateDate || !certificateData.authorityName) {
+      toast.error('All certificate fields are required');
+      return;
+    }
 
-  setIsVerifying(true);
-  try {
-    const token = localStorage.getItem('token');
-    
-    // Map frontend field names to backend expected names
-    const payload = {
-      documentIssuer: certificateData.documentIssuer,           // Field 2
-      documentTitle: certificateData.actingCapacity,            // Field 3 (mapped)
-      documentLocation: certificateData.documentLocation,       // Field 4 (seal location)
-      certificateLocation: certificateData.certificateLocation, // Field 5
-      certificateDate: certificateData.certificateDate,         // Field 6
-      authorityName: certificateData.authorityName              // Field 7
-    };
-    
-    console.log('Sending payload:', payload); // Debug log
-    
-    const response = await axios.post(
-      `/api/files/verify/${selectedUpload.id}`,
-      payload,
-      { headers: { 'x-auth-token': token } }
-    );
-    
-    toast.success('e-APOSTILLE Certificate generated successfully!');
-    
-    // Refresh data
-    const [pendingRes, completedRes] = await Promise.all([
-      axios.get('/api/files/pending', { headers: { 'x-auth-token': token } }),
-      axios.get('/api/files/completed', { headers: { 'x-auth-token': token } })
-    ]);
-    
-    setPendingUploads(pendingRes.data);
-    setCompletedUploads(completedRes.data);
-    setSelectedUpload(null);
-  } catch (error: any) {
-    console.error('Verification failed', error);
-    console.error('Error response:', error.response?.data);
-    toast.error(error.response?.data?.message || error.response?.data?.error || 'Certificate generation failed');
-  } finally {
-    setIsVerifying(false);
-  }
-};
+    // Validate re-uploaded files
+    if (reuploadedFiles.length === 0) {
+      toast.error('Please re-upload documents with stamps (Field 8)');
+      return;
+    }
+
+    setIsVerifying(true);
+    try {
+      const token = localStorage.getItem('token');
+      
+      // Create FormData for file upload
+      const formData = new FormData();
+      
+      // Add re-uploaded files
+      reuploadedFiles.forEach(file => {
+        formData.append('reuploadedFiles', file);
+      });
+      
+      // Add certificate data
+      formData.append('documentIssuer', certificateData.documentIssuer);
+      formData.append('documentTitle', certificateData.actingCapacity);
+      formData.append('documentLocation', certificateData.documentLocation);
+      formData.append('certificateLocation', certificateData.certificateLocation);
+      formData.append('certificateDate', certificateData.certificateDate);
+      formData.append('authorityName', certificateData.authorityName);
+      formData.append('additionalSigners', JSON.stringify(selectedSigners));
+      
+      const response = await axios.post(
+        `/api/files/verify/${selectedUpload.id}`,
+        formData,
+        { 
+          headers: { 
+            'x-auth-token': token,
+            'Content-Type': 'multipart/form-data'
+          } 
+        }
+      );
+      
+      toast.success('e-APOSTILLE Certificate and signed documents generated successfully!');
+      
+      // Refresh data
+      const [pendingRes, completedRes] = await Promise.all([
+        axios.get('/api/files/pending', { headers: { 'x-auth-token': token } }),
+        axios.get('/api/files/completed', { headers: { 'x-auth-token': token } })
+      ]);
+      
+      setPendingUploads(pendingRes.data);
+      setCompletedUploads(completedRes.data);
+      setSelectedUpload(null);
+      setSelectedSigners([]);
+      setReuploadedFiles([]);
+    } catch (error: any) {
+      console.error('Verification failed', error);
+      toast.error(error.response?.data?.message || error.response?.data?.error || 'Certificate generation failed');
+    } finally {
+      setIsVerifying(false);
+    }
+  };
 
   const handleDeleteUpload = async (uploadId: number) => {
     if (!window.confirm('আপনি কি নিশ্চিত আপনি এই আবেদনটি মুছে ফেলতে চান? এই কাজটি পূর্বাবস্থায় ফেরানো যাবে না।')) {
@@ -136,7 +208,6 @@ const AdminDashboard = () => {
       
       toast.success('আবেদন সফলভাবে মুছে ফেলা হয়েছে!');
       
-      // Refresh pending uploads
       const pendingRes = await axios.get('/api/files/pending', {
         headers: { 'x-auth-token': token }
       });
@@ -162,7 +233,6 @@ const AdminDashboard = () => {
     <div className="min-h-screen bg-gray-50 flex flex-col">
       <Header />
       
-      {/* Admin Action Bar with Logout */}
       <div className="bg-white border-b border-gray-200 py-4 mb-6 shadow-sm">
         <div className="container mx-auto px-4 flex flex-col sm:flex-row justify-between items-center gap-4">
           <div>
@@ -193,7 +263,6 @@ const AdminDashboard = () => {
       </div>
 
       <main className="container mx-auto px-4 py-2 flex-grow">
-        {/* Tables in Row Layout (Stacked) */}
         <div className="space-y-6">
           {/* Pending Uploads Table */}
           <div className="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
@@ -313,17 +382,16 @@ const AdminDashboard = () => {
                           {new Date(upload.verified_at).toLocaleDateString('bn-BD')}
                         </td>
                         <td className="px-4 py-3">
-                          <a 
-                            href={`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/uploads/${extractFilename(upload.file_path)}`} 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center px-3 py-1 border border-blue-600 text-blue-700 text-xs font-medium rounded-full bg-blue-50 hover:bg-blue-100 transition-colors"
+                          <button
+                            onClick={() => navigate(`/verify/${upload.certificate_number}`)}
+                            className="inline-flex items-center px-3 py-1 border border-green-600 text-green-700 text-xs font-medium rounded-full bg-green-50 hover:bg-green-100 transition-colors"
                           >
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                             </svg>
-                            ডাউনলোড
-                          </a>
+                            View & Verify
+                          </button>
                         </td>
                       </tr>
                     ))
@@ -334,10 +402,10 @@ const AdminDashboard = () => {
           </div>
         </div>
 
-        {/* Verification Modal - e-APOSTILLE Certificate Generator */}
+        {/* Verification Modal */}
         {selectedUpload && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-auto">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-auto">
               <div className="p-6">
                 <div className="flex justify-between items-start mb-4">
                   <h3 className="text-xl font-bold text-gray-800 flex items-center gap-2">
@@ -372,20 +440,13 @@ const AdminDashboard = () => {
                 </div>
 
                 <div className="space-y-4">
-                  {/* Field 1: Country (Fixed) */}
+                  {/* Field 1: Country */}
                   <div className="bg-green-50 p-3 rounded-lg border border-green-200">
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       <span className="bg-green-600 text-white text-xs font-bold px-2 py-0.5 rounded mr-2">1</span>
                       Country (Fixed)
                     </label>
-                    <div className="mt-1">
-                      <input
-                        type="text"
-                        value="BANGLADESH"
-                        disabled
-                        className="w-full px-3 py-2 bg-green-100 border border-green-300 rounded-lg font-bold text-green-800 cursor-not-allowed"
-                      />
-                    </div>
+                    <input type="text" value="BANGLADESH" disabled className="w-full px-3 py-2 bg-green-100 border border-green-300 rounded-lg font-bold text-green-800 cursor-not-allowed" />
                   </div>
 
                   {/* Issuing Authority Section */}
@@ -393,7 +454,7 @@ const AdminDashboard = () => {
                     <h4 className="font-bold text-gray-800 text-sm uppercase tracking-wide">Issuing Authority</h4>
                   </div>
 
-                  {/* Field 2: Has been signed by */}
+                  {/* Field 2 */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-2">
                       <span className="bg-blue-600 text-white text-xs font-bold px-2 py-0.5 rounded">2</span>
@@ -408,7 +469,7 @@ const AdminDashboard = () => {
                     />
                   </div>
 
-                  {/* Field 3: Acting in the capacity of */}
+                  {/* Field 3 */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-2">
                       <span className="bg-blue-600 text-white text-xs font-bold px-2 py-0.5 rounded">3</span>
@@ -423,7 +484,7 @@ const AdminDashboard = () => {
                     />
                   </div>
 
-                  {/* Field 4: Bears the seal/stamp of */}
+                  {/* Field 4 */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-2">
                       <span className="bg-blue-600 text-white text-xs font-bold px-2 py-0.5 rounded">4</span>
@@ -443,7 +504,7 @@ const AdminDashboard = () => {
                     <h4 className="font-bold text-blue-800 text-sm uppercase tracking-wide">Certified</h4>
                   </div>
 
-                  {/* Field 5: At location */}
+                  {/* Field 5 */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-2">
                       <span className="bg-blue-600 text-white text-xs font-bold px-2 py-0.5 rounded">5</span>
@@ -458,7 +519,7 @@ const AdminDashboard = () => {
                     />
                   </div>
 
-                  {/* Field 6: The date */}
+                  {/* Field 6 */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-2">
                       <span className="bg-blue-600 text-white text-xs font-bold px-2 py-0.5 rounded">6</span>
@@ -472,44 +533,108 @@ const AdminDashboard = () => {
                     />
                   </div>
 
-{/* Field 7: By authority */}
-<div>
-  <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-2">
-    <span className="bg-blue-600 text-white text-xs font-bold px-2 py-0.5 rounded">7</span>
-    by [name], Assistant Secretary, Ministry of Foreign Affairs *
-  </label>
-  <select
-    value={certificateData.authorityName}
-    onChange={(e) => setCertificateData({...certificateData, authorityName: e.target.value})}
-    className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
-  >
-    <option value="MD. ASIF KHAN PRANTO">MD. ASIF KHAN PRANTO</option>
-    <option value="TUSHAR">TUSHAR</option>
-    <option value="ANIK">ANIK</option>
-  </select>
-  <p className="text-xs text-gray-500 mt-1">Name will appear in uppercase in certificate</p>
-</div>
-
-                  {/* Field 8: Certificate Number (Auto-generated) */}
-                  <div className="bg-yellow-50 p-3 rounded-lg border border-yellow-200">
+                  {/* Field 7 */}
+                  <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-2">
-                      <span className="bg-yellow-600 text-white text-xs font-bold px-2 py-0.5 rounded">8</span>
-                      No [12-digit number] (Auto-generated)
+                      <span className="bg-blue-600 text-white text-xs font-bold px-2 py-0.5 rounded">7</span>
+                      by [name], Assistant Secretary, Ministry of Foreign Affairs *
                     </label>
-                    <div className="mt-1">
-                      <input
-                        type="text"
-                        value="Will be generated automatically (12 digits)"
-                        disabled
-                        className="w-full px-3 py-2 bg-yellow-100 border border-yellow-300 rounded-lg font-medium text-yellow-800 cursor-not-allowed"
-                      />
-                    </div>
+                    <select
+                      value={certificateData.authorityName}
+                      onChange={(e) => setCertificateData({...certificateData, authorityName: e.target.value})}
+                      className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                    >
+                      <option value="MD. ASIF KHAN PRANTO">MD. ASIF KHAN PRANTO</option>
+                      <option value="TUSHAR">TUSHAR</option>
+                      <option value="ANIK">ANIK</option>
+                    </select>
                   </div>
 
-                  {/* Fields 9 & 10: Auto-generated info */}
+                  {/* Field 8: Re-upload Documents */}
+                  <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      <span className="bg-yellow-600 text-white text-xs font-bold px-2 py-0.5 rounded mr-2">8</span>
+                      Re-upload Documents with Stamps/Annotations *
+                    </label>
+                    <input
+                      type="file"
+                      multiple
+                      accept="image/*,application/pdf"
+                      onChange={handleReuploadFiles}
+                      className="w-full px-3 py-2 border border-yellow-300 rounded-lg bg-white"
+                    />
+                    <p className="text-xs text-yellow-700 mt-1">
+                      {reuploadedFiles.length > 0 ? `${reuploadedFiles.length} file(s) selected` : 'No files selected'}
+                    </p>
+                    {reuploadedFiles.length > 0 && (
+                      <div className="mt-2 space-y-1">
+                        {reuploadedFiles.map((file, idx) => (
+                          <p key={idx} className="text-xs text-gray-600 flex items-center gap-1">
+                            <svg className="h-3 w-3 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                            </svg>
+                            {file.name}
+                          </p>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Field 9: Additional Signatures */}
+                  <div className="bg-purple-50 p-4 rounded-lg border border-purple-200">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      <span className="bg-purple-600 text-white text-xs font-bold px-2 py-0.5 rounded mr-2">9</span>
+                      Additional Signatures for Documents
+                    </label>
+                    
+                    <select
+                      onChange={(e) => addSigner(Number(e.target.value))}
+                      className="w-full px-3 py-2 border border-purple-300 rounded-lg mb-3 bg-white"
+                      value=""
+                    >
+                      <option value="">Select a signer to add...</option>
+                      {additionalSigners.map(signer => (
+                        <option key={signer.id} value={signer.id}>
+                          {signer.name} - {signer.designation}
+                        </option>
+                      ))}
+                    </select>
+                    
+                    {selectedSigners.length > 0 && (
+                      <div className="space-y-2">
+                        {selectedSigners.map(selected => {
+                          const signer = additionalSigners.find(s => s.id === selected.signerId);
+                          return (
+                            <div key={selected.signerId} className="flex items-center gap-2 bg-white p-2 rounded border border-purple-200">
+                              <div className="flex-1">
+                                <p className="font-medium text-sm text-gray-800">{signer?.name}</p>
+                                <p className="text-xs text-gray-500">{signer?.designation}, {signer?.organization}</p>
+                              </div>
+                              <input
+                                type="date"
+                                value={selected.date}
+                                onChange={(e) => updateSignerDate(selected.signerId, e.target.value)}
+                                className="px-2 py-1 border border-gray-300 rounded text-sm"
+                              />
+                              <button
+                                onClick={() => removeSigner(selected.signerId)}
+                                className="text-red-600 hover:text-red-800 p-1"
+                              >
+                                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Field 10: Auto-generated info */}
                   <div className="bg-gray-50 p-3 rounded-lg border border-gray-200">
                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                      <span className="bg-gray-600 text-white text-xs font-bold px-2 py-0.5 rounded mr-2">9-10</span>
+                      <span className="bg-gray-600 text-white text-xs font-bold px-2 py-0.5 rounded mr-2">10</span>
                       Seal/Stamp & Signature (Auto-generated)
                     </label>
                     <div className="grid grid-cols-2 gap-4">
@@ -537,7 +662,7 @@ const AdminDashboard = () => {
                   <button
                     onClick={handleVerify}
                     disabled={isVerifying || !certificateData.documentIssuer || !certificateData.actingCapacity || 
-                              !certificateData.documentLocation || !certificateData.certificateLocation}
+                              !certificateData.documentLocation || !certificateData.certificateLocation || reuploadedFiles.length === 0}
                     className={`px-5 py-2.5 rounded-lg text-white font-medium flex items-center justify-center gap-2 w-full sm:w-auto ${
                       isVerifying 
                         ? 'bg-green-400 cursor-not-allowed' 
@@ -569,7 +694,7 @@ const AdminDashboard = () => {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
                     <span>
-                      Certificate Format: Fields 9 (Seal) and 10 (Signature) will be automatically added based on the authority selected. The certificate will follow the official e-APOSTILLE format as per Hague Convention of 1961.
+                      Certificate Format: Fields 9 (Seal) and 10 (Signature) will be automatically added based on the authority selected. Additional signatures (Field 9) will be attached to the bottom of re-uploaded documents.
                     </span>
                   </p>
                 </div>

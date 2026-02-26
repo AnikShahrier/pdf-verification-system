@@ -720,17 +720,12 @@ const getFileUrls = (upload: any) => {
                               </button> */}
                             </div>
                           ) : (
-                            <a 
-                              href={`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/uploads/${extractFilename(upload.file_path)}`} 
-                              target="_blank" 
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center px-3 py-1 border border-green-600 text-green-700 text-xs font-medium rounded-full bg-green-50 hover:bg-green-100 transition-colors"
-                            >
-                              <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                              </svg>
-                              ডাউনলোড
-                            </a>
+                            <button
+  onClick={() => navigate(`/verify/${upload.certificate_number}`)}
+  className="inline-flex items-center px-3 py-1 border border-green-600 text-green-700 text-xs font-medium rounded-full bg-green-50 hover:bg-green-100 transition-colors"
+>
+  দেখুন ও ডাউনলোড
+</button>
                           )}
                         </td>
                       </tr>
