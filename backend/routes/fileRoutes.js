@@ -3,7 +3,9 @@ const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 const path = require('path');
-const fs = require('fs').promises;
+const fs = require('fs');
+const fsp = fs.promises;
+const fsRegular = require('fs');
 const { verifyToken, authorizeRole } = require('../middleware/auth');
 const pool = require('../config/db');
 
@@ -87,7 +89,7 @@ async function embedImageToPDF(pdfDoc, imagePath) {
 // ========== MULTER CONFIGURATION ==========
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const uploadDir = path.join(__dirname, '../', process.env.UPLOAD_DIR || 'uploads');
+    const uploadDir = path.join(__dirname, '../', process.env.UPLOAD_DIR || 'uploads/original');
     cb(null, uploadDir);
   },
   filename: (req, file, cb) => {
@@ -359,6 +361,8 @@ router.get('/verify/:certificateNumber', async (req, res) => {
   }
 });
 
+
+
 // Modified verify endpoint with re-upload and additional signatures
 router.post('/verify/:id', verifyToken, authorizeRole('admin'), upload.array('reuploadedFiles', 10), async (req, res) => {
   const uploadId = req.params.id;
@@ -568,6 +572,34 @@ router.delete('/:id', verifyToken, async (req, res) => {
       message: 'Server error during deletion', 
       error: err.message 
     });
+  }
+});
+
+// Serve uploaded files for download (admin only)
+// Serve uploaded files for download (admin only)
+// Serve uploaded files for download (admin only)
+// Serve uploaded files for download (admin only)
+router.get('/uploads/:filename', verifyToken, authorizeRole('admin'), async (req, res) => {
+  try {
+    const filename = req.params.filename;
+    
+    // Correct path: from routes folder, go up one level to backend, then to uploads
+    const filePath = path.join(__dirname, '..', 'uploads', filename);
+    
+    console.log('Looking for file at:', filePath);
+    console.log('File exists:', fsRegular.existsSync(filePath));
+    
+    if (!fsRegular.existsSync(filePath)) {
+      return res.status(404).json({ message: 'File not found', path: filePath });
+    }
+    
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.sendFile(path.resolve(filePath));
+    
+  } catch (error) {
+    console.error('File serve error:', error);
+    res.status(500).json({ message: 'Error serving file' });
   }
 });
 

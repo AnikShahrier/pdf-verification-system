@@ -40,9 +40,8 @@ const AppContent: React.FC = () => {
   return (
     <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <Routes>
-        <Route path="/login" element={!user ? <Login /> : <Navigate to="/dashboard" />} />
-        <Route path="/register" element={!user ? <Register /> : <Navigate to="/dashboard" />} />
-        
+        <Route path="/login" element={<Login />} />
+<Route path="/register" element={<Register />} />
         <Route 
           path="/dashboard" 
           element={
@@ -52,7 +51,9 @@ const AppContent: React.FC = () => {
           } 
         />
         
-          <Route path="/verify/:certificateNumber" element={<VerificationPage />} />
+          <Route path="/verify/:certificateNumber" element={<ProtectedRoute>
+      <VerificationPage />
+    </ProtectedRoute>} />
 
         <Route 
           path="/upload" 
@@ -72,7 +73,7 @@ const AppContent: React.FC = () => {
           } 
         />
         
-        <Route path="/" element={<Navigate to={user ? "/dashboard" : "/login"} />} />
+        <Route path="/" element={<Navigate to="/login" replace />} />
       </Routes>
     </Router>
   );
